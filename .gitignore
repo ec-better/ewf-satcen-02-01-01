@@ -1,0 +1,10 @@
+.ipynb_checkpoints
+runc
+__pycache__
+*.properties
+*.pyc
+*.tif
+*.vrt
+target
+*.data
+*.dim
