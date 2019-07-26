@@ -73,7 +73,7 @@ def bbox_to_wkt(bbox):
     return box(*[float(c) for c in bbox.split(',')]).wkt
 
 
-def pre_process(products, aoi, utm_zone, polarization=None, orbit_type=None, show_graph=False):
+def pre_process(products, aoi, utm_zone, resolution='10.0', polarization=None, orbit_type=None, show_graph=False):
 
     #mygraph = GraphProcessor()
     
@@ -162,7 +162,7 @@ def pre_process(products, aoi, utm_zone, polarization=None, orbit_type=None, sho
         map_proj = utm_zone
 
         parameters['mapProjection'] = map_proj
-        parameters['pixelSpacingInMeter'] = '10.0'            
+        parameters['pixelSpacingInMeter'] = resolution            
         parameters['nodataValueAtSea'] = 'false'
         parameters['demName'] = 'SRTM 1Sec HGT'
         
@@ -446,7 +446,7 @@ def polygonize(input_tif, band, epsg):
     return gdf
 
 
-def create_composite(input_products, output_product, band_expression):
+def create_composite(input_products, output_product, band_expressions):
     
     BandMathX = otbApplication.Registry.CreateApplication("BandMathX")
 
