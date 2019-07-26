@@ -7,8 +7,19 @@ from shapely.geometry import box
 from snappy import jpy
 from snappy import ProductIO
 import gdal
-import osr 
+import osr
+import ogr
 from shapely.geometry import box
+import json
+import sys
+
+sys.path.append('/opt/OTB/lib/python')
+sys.path.append('/opt/OTB/lib/libfftw3.so.3')
+os.environ['OTB_APPLICATION_PATH'] = '/opt/OTB/lib/otb/applications'
+os.environ['LD_LIBRARY_PATH'] = '/opt/OTB/lib'
+os.environ['ITK_AUTOLOAD_PATH'] = '/opt/OTB/lib/otb/applications'
+
+import otbApplication
 
 def get_metadata(input_references, data_path):
     
@@ -244,7 +255,7 @@ def list_bands(product):
     return list(product.getBandNames())
 
 
-def change_detection(input_product, expression, show_graph=False):
+def change_detection(input_product, output_product, expression, show_graph=False):
     
     mygraph = GraphProcessor()
     
@@ -289,7 +300,7 @@ def change_detection(input_product, expression, show_graph=False):
 
     parameters = get_operator_default_parameters(operator)
 
-    parameters['file'] = 'temp_result'
+    parameters['file'] = output_product
     parameters['formatName'] = 'GeoTIFF-BigTIFF'
 
     node_id = 'Write'
@@ -348,6 +359,7 @@ def convert_dim(input_product, show_graph=False):
     
     mygraph.run()
 
+    return input_product.replace('.dim', '_db.tif')
     
 def cog(input_tif, output_tif):
     
@@ -395,3 +407,64 @@ def get_image_wkt(product):
                      transform.TransformPoint(max_x, max_y)[1]).wkt
     
     return result_wkt
+
+
+def polygonize(input_tif, band, epsg):
+    
+    epsg_code = epsg.split(':')[1]
+    
+    srs = osr.SpatialReference()
+    srs.ImportFromEPSG(int(epsg_code))
+
+    source_raster = gdal.Open(input_tif)
+    band = source_raster.GetRasterBand(band)
+    band_array = band.ReadAsArray()
+
+    out_vector_file = "polygonized.json"
+
+    driver = ogr.GetDriverByName('GeoJSON')
+
+    out_data_source = driver.CreateDataSource(out_vector_file+ "")
+    out_layer = out_data_source.CreateLayer(out_vector_file, srs=srs)
+
+    new_field = ogr.FieldDefn('change_detection', ogr.OFTInteger)
+    out_layer.CreateField(new_field)
+
+    gdal.Polygonize(band, None, out_layer, 0, [], callback=None )
+
+    out_data_source = None
+    source_raster = None
+
+    data = json.loads(open(out_vector_file).read())
+    gdf = gp.GeoDataFrame.from_features(data['features'])
+
+    gdf.crs = {'init':'epsg:{}'.format(epsg_code)}
+    gdf = gdf.to_crs(epsg=epsg_code)
+    
+    os.remove(out_vector_file)
+    
+    return gdf
+
+
+def create_composite(input_products, output_product, band_expression):
+    
+    BandMathX = otbApplication.Registry.CreateApplication("BandMathX")
+
+    BandMathX.SetParameterStringList('il', input_products)
+    BandMathX.SetParameterString('out', 'temp_red_green_blue.tif')
+    BandMathX.SetParameterString('exp', ';'.join(band_expressions))
+
+    BandMathX.ExecuteAndWriteOutput()
+
+    Convert = otbApplication.Registry.CreateApplication('Convert')
+
+    Convert.SetParameterString('in', 'temp_red_green_blue.tif')
+    Convert.SetParameterString('out', output_product)
+    Convert.SetParameterString('type', 'linear')
+    Convert.SetParameterString('channels', 'rgb')
+
+    Convert.ExecuteAndWriteOutput()
+
+    os.remove('temp_red_green_blue.tif')
+    
+    return output_product
