@@ -15,11 +15,13 @@ import sys
 
 sys.path.append('/opt/OTB/lib/python')
 sys.path.append('/opt/OTB/lib/libfftw3.so.3')
+sys.path.append('/opt/anaconda/bin')
 os.environ['OTB_APPLICATION_PATH'] = '/opt/OTB/lib/otb/applications'
 os.environ['LD_LIBRARY_PATH'] = '/opt/OTB/lib'
 os.environ['ITK_AUTOLOAD_PATH'] = '/opt/OTB/lib/otb/applications'
 
 import otbApplication
+from gdal_calc import Calc as gdalCalc
 
 def get_metadata(input_references, data_path):
     
@@ -468,3 +470,28 @@ def create_composite(input_products, output_product, band_expressions):
     os.remove('temp_red_green_blue.tif')
     
     return output_product
+
+def create_mask(in_composite, out_mask):
+    
+    #gdal_calc.py --calc="logical_and(logical_and(A==255, B==0), C==0)" -A $1 --A_band=1 -B $1 --B_band=2 -C $1 --C_band=3 --outfile=${1::-8}.mask.tif
+    
+    calc_exp="logical_and(logical_and(A==255, B==0), C==0)"
+    
+    gdalCalc(calc=calc_exp, A=in_composite, A_band=1, B=in_composite, B_band=2, C=in_composite, C_band=3, outfile=out_mask)
+    
+    
+def create_rbb(in_rgb, out_rbb):
+    
+    #gdal_translate -ot UInt16 -a_nodata 256 ${1::-14}RED-BLUE.rgb.tif ${1::-8}.acd.tif -co COMPRESS=LZW -b 1 -b 3 -b 3
+    
+    translate_options = gdal.TranslateOptions(gdal.ParseCommandLine('-co COMPRESS=LZW \
+                                                                    -a_nodata 256'))
+
+    ds = gdal.Open(in_rgb, gdal.OF_READONLY)
+
+    gdal.Translate(out_rbb, 
+                   ds, 
+                   bandList=[1,3,3],
+                   outputType=gdal.GDT_UInt16,
+                   options=translate_options)
+                   
