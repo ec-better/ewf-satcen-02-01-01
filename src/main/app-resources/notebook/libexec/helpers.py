@@ -484,14 +484,13 @@ def create_rbb(in_rgb, out_rbb):
     
     #gdal_translate -ot UInt16 -a_nodata 256 ${1::-14}RED-BLUE.rgb.tif ${1::-8}.acd.tif -co COMPRESS=LZW -b 1 -b 3 -b 3
     
-    translate_options = gdal.TranslateOptions(gdal.ParseCommandLine('-co COMPRESS=LZW \
-                                                                    -a_nodata 256'))
-
+    translate_options = gdal.TranslateOptions(gdal.ParseCommandLine('-co COMPRESS=LZW '\
+                                                                    '-ot UInt16 ' \
+                                                                    '-a_nodata 256 ' \
+                                                                    '-b 1 -b 3 -b 3 '))
+                                                                    
     ds = gdal.Open(in_rgb, gdal.OF_READONLY)
 
     gdal.Translate(out_rbb, 
                    ds, 
-                   bandList=[1,3,3],
-                   outputType=gdal.GDT_UInt16,
                    options=translate_options)
-                   
