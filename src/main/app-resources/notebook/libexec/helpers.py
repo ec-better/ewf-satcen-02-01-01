@@ -70,130 +70,209 @@ def analyse(row, data_path):
    
     return pd.Series(series)
 
+def group_analysis(df):
+    df['ordinal_type'] = 'NaN'
+    slave_date=df['startdate'].min()[:10]
+    master_date=df['startdate'].max()[:10]
+    for i in range(len(df)):
+    
+        if slave_date == df.iloc[i]['startdate'][:10]:
+            df.loc[i,'ordinal_type']='slave'
+    
+        elif master_date == df.iloc[i]['startdate'][:10]:
+            df.loc[i,'ordinal_type']='master'
+
+    return 
+
 def bbox_to_wkt(bbox):
     
     return box(*[float(c) for c in bbox.split(',')]).wkt
 
 
 def pre_process(products, aoi, utm_zone, resolution='10.0', polarization=None, orbit_type=None, show_graph=False):
-
-    #mygraph = GraphProcessor()
+    master_products=products[products['ordinal_type']=='master'].reset_index(drop=True)
+    slave_products=products[products['ordinal_type']=='slave'].reset_index(drop=True)
     
-    for index, product in products.iterrows():
-
-        mygraph = GraphProcessor()
+####Read and Assemble Masters
+    master_graph=GraphProcessor()
+    master_read_nodes = []
+    output_name_m='mst_' + master_products.iloc[0]['identifier'][:25]
+    
+    for index, product in master_products.iterrows():
         
+        output_name_m += '_'+product['identifier'][-4:]
         operator = 'Read'
         parameters = get_operator_default_parameters(operator)
-        node_id = 'Read-{0}'.format(index)
+        node_id = 'Read-M-{0}'.format(index)
         source_node_id = ''
         parameters['file'] = product.local_path 
-        mygraph.add_node(node_id,
+        master_graph.add_node(node_id,
                          operator, 
                          parameters,
                          source_node_id)
+        source_node_id_m = node_id
+        master_read_nodes.append(node_id)
 
-        source_node_id = node_id
-
-        operator = 'Subset'
+    if len(master_read_nodes)>1:
         
-        node_id = 'Subset-{0}'.format(index)
-        
+        source_nodes_id = master_read_nodes
+        operator = 'SliceAssembly'
+        node_id = 'SliceAssembly-M'
         parameters = get_operator_default_parameters(operator)
-        parameters['geoRegion'] = aoi
-        parameters['copyMetadata'] = 'true'
-
-        mygraph.add_node(node_id,
-                         operator,
-                         parameters,
-                         source_node_id)
-
-        source_node_id = node_id
-        
-        
-        operator = 'Apply-Orbit-File'
-
-        parameters = get_operator_default_parameters(operator)
-        
-        if orbit_type == 'Restituted':
-        
-            parameters['orbitType'] = 'Sentinel Restituted (Auto Download)'
-            
-
-        node_id = 'Apply-Orbit-File-{0}'.format(index)
-        mygraph.add_node(node_id, 
+        parameters['selectedPolarisations'] = polarization
+        master_graph.add_node(node_id,
                          operator, 
-                         parameters, 
-                         source_node_id)
-
-        source_node_id = node_id
-
-        #operator = 'ThermalNoiseRemoval'
-        #node_id = 'ThermalNoiseRemoval-{0}'.format(index)
-        #parameters = get_operator_default_parameters(operator)
-        #mygraph.add_node(node_id,
-        #                 operator,
-        #                 parameters,
-        #                 source_node_id)
-
-        #source_node_id = node_id
-
-        operator = 'Calibration'
-        node_id = 'Calibration-{0}'.format(index)
-        parameters = get_operator_default_parameters(operator)
-
-        parameters['outputSigmaBand'] = 'true'
-        
-        if polarization is not None:
-            
-            parameters['selectedPolarisations'] = polarization
-        
-        mygraph.add_node(node_id,
-                         operator,
                          parameters,
-                         source_node_id)
-
-        source_node_id = node_id
-
-        operator = 'Terrain-Correction'
+                         source_nodes_id)
+        source_node_id_m = node_id
     
-        node_id = 'Terrain-Correction-{0}'.format(index)
+ ###### Read and Assemble Slaves    
     
+    slave_read_nodes = []
+    slave_graph = GraphProcessor()
+    output_name_s = 'slv_'+ slave_products.iloc[0]['identifier'][:25]
+    for index, product in slave_products.iterrows():
+        output_name_s += '_'+product['identifier'][-4:]
+        operator = 'Read'
         parameters = get_operator_default_parameters(operator)
-
-        map_proj = utm_zone
-
-        parameters['mapProjection'] = map_proj
-        parameters['pixelSpacingInMeter'] = resolution            
-        parameters['nodataValueAtSea'] = 'false'
-        parameters['demName'] = 'SRTM 1Sec HGT'
-        
-        mygraph.add_node(node_id,
-                         operator,
+        node_id = 'Read-S-{0}'.format(index)
+        source_node_id = ''
+        parameters['file'] = product.local_path 
+        slave_graph.add_node(node_id,
+                         operator, 
                          parameters,
                          source_node_id)
-
-        source_node_id = node_id
-
+        source_node_id_s = node_id
+        slave_read_nodes.append(node_id)
         
-        operator = 'Write'
-
+        
+    if len(slave_read_nodes)>1:
+        
+        source_nodes_id = slave_read_nodes
+        operator = 'SliceAssembly'
+        node_id = 'SliceAssembly-S'
         parameters = get_operator_default_parameters(operator)
-
-        parameters['file'] = product.identifier 
-        parameters['formatName'] = 'BEAM-DIMAP'
-
-        node_id = 'Write-{0}'.format(index)
-
-        mygraph.add_node(node_id,
-                         operator,
+        parameters['selectedPolarisations'] = polarization
+        slave_graph.add_node(node_id,
+                         operator, 
                          parameters,
-                         source_node_id)
+                         source_nodes_id)
+        source_node_id_s = node_id
        
-        if show_graph: 
-            mygraph.view_graph()
-        
-        mygraph.run()
+  ######Continue pre-processing master & slave products in two seperate graphs
+    
+    operator = 'Subset'   
+    parameters = get_operator_default_parameters(operator)
+    parameters['geoRegion'] = aoi
+    parameters['copyMetadata'] = 'true'
+    node_id = 'Subset-S'
+    slave_graph.add_node(node_id,
+                         operator,
+                         parameters,
+                         source_node_id_s)
+    source_node_id_s = node_id
+    node_id = 'Subset-M'
+    master_graph.add_node(node_id,
+                         operator,
+                         parameters,
+                         source_node_id_m)
+
+    source_node_id_m = node_id
+
+    
+    operator = 'Apply-Orbit-File'
+    parameters = get_operator_default_parameters(operator)
+    if orbit_type == 'Restituted':
+        parameters['orbitType'] = 'Sentinel Restituted (Auto Download)'
+    node_id = 'Apply-Orbit-File-S'
+    slave_graph.add_node(node_id,
+                         operator,
+                         parameters,
+                         source_node_id_s)
+    source_node_id_s = node_id
+    
+    node_id = 'Apply-Orbit-File-M'
+    master_graph.add_node(node_id,
+                         operator,
+                         parameters,
+                         source_node_id_m)
+
+    source_node_id_m = node_id
+ 
+    
+    operator = 'Calibration'
+    parameters = get_operator_default_parameters(operator)
+    parameters['outputSigmaBand'] = 'true'
+    if polarization is not None:
+        parameters['selectedPolarisations'] = polarization
+    node_id = 'Calibration-S'
+    slave_graph.add_node(node_id,
+                         operator,
+                         parameters,
+                         source_node_id_s)
+    source_node_id_s = node_id
+    
+    node_id = 'Calibration-M'
+    master_graph.add_node(node_id,
+                         operator,
+                         parameters,
+                         source_node_id_m)
+
+    source_node_id_m = node_id
+    
+    
+    operator = 'Terrain-Correction'
+    parameters = get_operator_default_parameters(operator)
+    map_proj = utm_zone
+
+    parameters['mapProjection'] = map_proj
+    parameters['pixelSpacingInMeter'] = resolution            
+    parameters['nodataValueAtSea'] = 'false'
+    parameters['demName'] = 'SRTM 1Sec HGT'
+    
+    node_id = 'Terrain-Correction-S'
+    slave_graph.add_node(node_id,
+                         operator,
+                         parameters,
+                         source_node_id_s)
+    source_node_id_s = node_id
+    
+    node_id = 'Terrain-Correction-M'
+    master_graph.add_node(node_id,
+                         operator,
+                         parameters,
+                         source_node_id_m)
+
+    source_node_id_m = node_id
+    
+    operator = 'Write'
+    parameters = get_operator_default_parameters(operator)
+    parameters['formatName'] = 'BEAM-DIMAP' 
+    
+     
+    node_id = 'Write-S'
+    parameters['file'] = output_name_s
+    slave_graph.add_node(node_id,
+                         operator,
+                         parameters,
+                         source_node_id_s)
+    
+    
+    node_id = 'Write-M'
+    parameters['file'] =  output_name_m
+    master_graph.add_node(node_id,
+                         operator,
+                         parameters,
+                         source_node_id_m)
+
+    if show_graph: 
+            master_graph.view_graph()
+            slave_graph.view_graph()
+    
+    
+    master_graph.run()
+    slave_graph.run()
+    return [output_name_m,output_name_s]
         
 
 def create_stack(products, show_graph=True):
@@ -203,7 +282,7 @@ def create_stack(products, show_graph=True):
     operator = 'ProductSet-Reader'
     parameters = get_operator_default_parameters(operator)
     
-    parameters['fileList'] = ','.join([ '{}.dim'.format(n) for n in products.identifier.values])
+    parameters['fileList'] = ','.join([ '{}.dim'.format(n) for n in products])
     
     node_id = 'ProductSet-Reader'
     source_node_id = ''
